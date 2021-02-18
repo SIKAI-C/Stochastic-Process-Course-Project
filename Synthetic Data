@@ -1,0 +1,170 @@
+###################
+### IMPORT PART ###
+###################
+
+import numpy as np 
+from scipy import stats
+from tqdm import tqdm
+
+
+
+##################
+### PARAMETERS ###
+##################
+
+SgnLev     = 0.05               # significant level used to do the hypothesis testing
+T_list     = [200,1000]         # the fixed length of the stationary process
+case_list  = ["1","2","3","4"]  # the different distribution of interarrival time 
+                                # "1" - Exponential; "2" - Erlang2; "3" - Erlang4; "4" - Hyperexponential2
+
+
+
+#######################
+### GENERATING DATA ###
+#######################
+
+def generator_ArrivalTime(periods,case = "1"):
+    '''
+    generator_ArrivalTime:
+        Generate the arrival time with the exponential/E2/E4/H2 distributed interarrival time.
+    
+    Parameters:
+        periods - the fixed length of the stationary process which takes values from T_list (200/1000)
+        case    -  "1": exponential distributed interarrival time
+                "2": Erlang-2 distributed interarrival time
+                "3": Erlang-4 distributed interarrival time
+                "4": Hyperexponential-2 distributed interarrival time
+
+    Return:
+        time_set - a list with 10000 items. each item is a numpy array which includes arrival time information
+        of a stationary process with a specific distributed interarrival time in one period
+    '''
+    time_set = []
+    for replication in range(10000): # tqdm
+        if case == "1":
+            interarrival_time = np.random.exponential(1,[1,10000])
+        if case == "2":
+            auxilliary_data_1 = np.random.exponential(0.5,[1,10000])
+            auxilliary_data_2 = np.random.exponential(0.5,[1,10000])
+            interarrival_time = auxilliary_data_1 + auxilliary_data_2
+        if case == "3":
+            auxilliary_data_1 = np.random.exponential(0.25,[1,10000])
+            auxilliary_data_2 = np.random.exponential(0.25,[1,10000])
+            auxilliary_data_3 = np.random.exponential(0.25,[1,10000])
+            auxilliary_data_4 = np.random.exponential(0.25,[1,10000])
+            interarrival_time = auxilliary_data_1 + auxilliary_data_2 + auxilliary_data_3 + auxilliary_data_4
+        if case == "4":
+            auxilliary_data = np.random.uniform(0,1,[1,10000])
+            interarrival_time = (-3/2)*np.log((-1+np.sqrt(25-24*auxilliary_data))/4)
+        arrival_time = np.cumsum(interarrival_time)
+        desired_arrival_time = arrival_time[np.where((arrival_time>=1000)&(arrival_time<=(1000+periods)))]
+        desired_arrival_time = desired_arrival_time - 1000
+        desired_arrival_time.tolist()
+        time_set.append(desired_arrival_time)
+    return time_set
+
+
+
+###############
+### CU Test ###
+###############
+
+def cu_test(data,Periods,alpha=SgnLev):
+    '''
+    cu_test:
+        implement the Conditional-Uniform Test for "data" (which will explained below)
+
+    Parameters:
+        data    - "time_set", the return of the generator_ArrivalTime function
+        Periods - the same as the parameter "periods" in the generator_ArrivalTime function
+        alpha   - the criterion used to do the hypothesis testing (0.05)
+
+    Returns:
+        NumTestPass - the number of data that passed the CU Test in 10000 sets of the data
+        AvgPvalue   - the average p-value of 10000 tests
+    '''
+    NumTestPass = 0
+    TotPvalue = 0
+    for idx in range(10000): 
+        sample_data = data[idx]
+        sample_data = sample_data/Periods
+        (a,p_value) = stats.kstest(sample_data,"uniform")
+        TotPvalue = TotPvalue + p_value
+        if p_value >= alpha:
+            NumTestPass = NumTestPass + 1
+    AvgPvalue = TotPvalue/10000
+    return NumTestPass,AvgPvalue
+
+
+
+################
+### Log Test ###
+################
+
+def R_forLogTest(sample_data,Periods):
+    '''
+    R_forLogTest:
+        process the data in time_set to the value which is used to do the Log Test
+    
+    Parameters:
+        Periods - the same as the parameter "periods" in the generator_ArrivalTime function
+    
+    Return:
+        R_data - the data used in Log Test
+    '''
+    n = len(sample_data)
+    R1 = n*np.log(Periods/(Periods-sample_data[0]))
+    R_data = [R1]
+    for i in range(1,n):
+        r = (n-i)*np.log((Periods-sample_data[i-1])/(Periods-sample_data[i]))
+        R_data.append(r)
+    return R_data
+
+# define a function to implement the Log Test
+def log_test(data,Periods,alpha=SgnLev):
+    '''
+    log_test:
+        implement the Log Test for "data" (which will explained below)
+
+    Parameters:
+        data    - "time_set", the return of the generator_ArrivalTime function
+        Periods - the same as the parameter "periods" in the generator_ArrivalTime function
+        alpha   - the criterion used to do the hypothesis testing (0.05)
+
+
+    Returns:
+        NumTestPass - the number of data that passed the Log Test in 10000 sets of the data
+        AvgPvalue   - the average p-value of 10000 tests
+    '''
+    NumTestPass = 0
+    TotPvalue = 0
+    for idx in range(10000): 
+        sample_data = data[idx]
+        sample_data = R_forLogTest(sample_data,Periods)
+        (a,p_value) = stats.kstest(sample_data,"expon")
+        TotPvalue = TotPvalue + p_value
+        if p_value >= alpha:
+            NumTestPass = NumTestPass + 1
+        AvgPvalue = TotPvalue/10000
+    return NumTestPass,AvgPvalue
+
+
+
+##################
+### CONCLUSION ###
+##################
+
+# final report and conclusion
+print("----------------------------------------------------------------------------------------------------")
+print("------------------------------------------- CONCLUSION ---------------------------------------------")
+print("----------------------------------------------------------------------------------------------------")
+for T in T_list:
+    for case in case_list:
+        print("T = ",T)
+        print("case = ",case)
+        data = generator_ArrivalTime(T,case) 
+        a,b = cu_test(data,T)
+        c,d = log_test(data,T)
+        print("there are ",a," replications pass the cu test, the average p-value is",b)
+        print("there are ",c," replications pass the log test, the average p-value is",d)
+        print("----------------------------------------------------------------------------------------------------")
