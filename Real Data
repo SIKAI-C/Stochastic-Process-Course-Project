@@ -1,0 +1,350 @@
+###################
+### IMPORT PART ###
+###################
+
+import codecs
+import numpy as np 
+from scipy import stats
+from tqdm import tqdm
+from datetime import datetime
+from datetime import timedelta 
+
+
+
+##################
+### PARAMETERS ###
+##################
+
+'''
+wd  - weekday:
+    "Mon", "Tus", "Wed", "Thu", "Fri", "Sat", "Sun"
+bl  - block length:
+    Break up a day into small time block (/interval) with length bl (unit = min).
+    By testing the arrivals in each time block to get the result about whether or not the arrivals over
+    the day are non-homogeneous Poisson.
+dlb - data lower bound:
+    the lower bound of the number of arrivals in each time block
+    it is used to do the data processing and cleaning, the time blocks which have arrivals less than dlb
+    are considered as invalid information
+ct  - criterion:
+    a real number between 0 and 1
+    days which have the rate of time blocks passing the test is greater than ct are considered following 
+    the null hypothesis, i.e. NHPP
+'''
+
+
+####################
+### LOADING DATA ###
+####################
+
+def load_arrivaltime(txt_name):
+    '''
+    load_arrivaltime:
+        extract the date and time information from the .txt file
+    
+    Parameters:
+        txt_name - the file name of the unprocessed .txt file
+
+    Return:
+        date_time - the list includes converted date and time information (in the origin file) which is in "datetime" type
+    '''
+    f = codecs.open(txt_name, mode="r", encoding="utf-8")
+    line = f.readline()
+    date_time = []
+    flag = 1
+    while line:
+        if flag == 1:
+            flag = 0
+            line = f.readline()
+            next
+        a = line.split()
+        b = a[5]
+        c = a[6]
+        d = b+" "+c
+        d_DatetimeType = datetime.strptime(d,"%y%m%d %H:%M:%S")
+        date_time.append(d_DatetimeType)
+        line = f.readline()
+    f.close()
+    return date_time
+
+# data include the date and time information and in "datetime" type
+jan = load_arrivaltime("code\\january.txt")
+feb = load_arrivaltime("code\\february.txt")
+mar = load_arrivaltime("code\\march.txt")
+apr = load_arrivaltime("code\\april.txt")
+may = load_arrivaltime("code\\may.txt")
+jun = load_arrivaltime("code\\june.txt")
+jul = load_arrivaltime("code\\july.txt")
+aug = load_arrivaltime("code\\august.txt")
+sep = load_arrivaltime("code\\september.txt")
+ocb = load_arrivaltime("code\\october.txt")
+nov = load_arrivaltime("code\\november.txt")
+dec = load_arrivaltime("code\\december.txt")
+
+# organize the data by the date
+start_time = datetime.strptime("990101 0:00:00","%y%m%d %H:%M:%S")
+data_WholeYear = jan+feb+mar+apr+may+jun+jul+aug+sep+ocb+nov+dec
+list_WholeYear = []
+for i in tqdm(range(365)):
+    list_day = []
+    left = start_time + timedelta(days = i)
+    right = start_time + timedelta(days = i+1)
+    for time in data_WholeYear:
+        if (time >= left) & (time < right):
+            list_day.append(time)
+        else:
+            next
+    list_WholeYear.append(list_day)
+
+# convert the unit of time to seconds
+start_time = datetime.strptime("990101 0:00:00","%y%m%d %H:%M:%S")
+list_day_seconds_Mon = []
+list_day_seconds_Tus = []
+list_day_seconds_Wed = []
+list_day_seconds_Thu = []
+list_day_seconds_Fri = []
+list_day_seconds_Sat = []
+list_day_seconds_Sun = []
+for i in tqdm(range(365)):
+    start_everyday = start_time + timedelta(days = i)
+    list_day = list_WholeYear[i]
+    list_day_seconds = []
+    for j in list_day:
+        seconds_j = (j - start_everyday).seconds 
+        list_day_seconds.append(seconds_j)
+    date_i = start_everyday.date()
+    if date_i.isoweekday() == 1:
+        list_day_seconds_Mon.append(list_day_seconds)
+    if date_i.isoweekday() == 2:
+        list_day_seconds_Tus.append(list_day_seconds)
+    if date_i.isoweekday() == 3:
+        list_day_seconds_Wed.append(list_day_seconds)
+    if date_i.isoweekday() == 4:
+        list_day_seconds_Thu.append(list_day_seconds)
+    if date_i.isoweekday() == 5:
+        list_day_seconds_Fri.append(list_day_seconds)
+    if date_i.isoweekday() == 6:
+        list_day_seconds_Sat.append(list_day_seconds)
+    if date_i.isoweekday() == 7:
+        list_day_seconds_Sun.append(list_day_seconds)
+
+def trans_data(TestData, BlockLen,DataLowerBound):
+    '''
+    trans_data:
+        divide the file with records in 24 hours into many subfile each has part of records in a time block 
+
+    Parameters:
+        TestData         - the arrival records in a whole day (which cannot be tested by cu_test)
+        BlockLen         - "bl" in "PARAMETERS" part
+        DataLowerBound   - "dlb" in "PARAMETERS" part
+
+    Return:
+        data - a list with many numpy arrays
+                each arrays includes the arrivals information within one single time block
+                this list has the suitable data form can be test by cu_test fucntion
+    '''
+    testdata = np.array(TestData)
+    timeperiod = BlockLen*60 
+    num_sublist = int(24*3600/timeperiod)
+    data = []
+    for i in range(num_sublist):
+        left = i*timeperiod
+        right = (i+1)*timeperiod
+        sublist = testdata[(testdata >= left)&(testdata < right)]
+        if len(sublist) >= DataLowerBound:
+            sublist = sublist - left
+            sublist = sorted(sublist)
+            sublist = np.array(sublist)
+            data.append(sublist)
+    return data 
+
+
+
+###############
+### CU TEST ###
+###############
+
+def cu_test(data,Periods,alpha):
+    '''
+    cu_test:
+        implement the Conditional-Uniform Test for "data" (which will explained below)
+    
+    Parameters:
+        data      - the same as "data" from trans_data function
+        Periods   - bl*60
+        alpha     - the criterion used to do the hypothesis testing (0.05)
+
+    Return:
+        PassRate - in the tested day, the rate of time blocks passing the test
+                this item will be compared with the ct (in the "PARAMETER" part), and get the conclusion of whether the arrivals
+                in this tested day are distributed as NHPP
+    '''
+    NumTestPass = 0
+    num_data = len(data)
+    if num_data < 1:
+        return None
+    for idx in range(num_data): 
+        sample_data = data[idx]
+        sample_data = sample_data/Periods
+        (a,p_value) = stats.kstest(sample_data,"uniform")
+        if p_value >= alpha:
+            NumTestPass = NumTestPass + 1
+    PassRate = NumTestPass/num_data
+    return PassRate
+
+def cu_test_1(TestData, BlockLen, DataLowerBound, SgLev=0.05):
+    '''
+    cu_test_1:
+        transform the data into the suitable form and test it by cu_test
+    
+    Parameters:
+        TestData           - the arrival records in a whole day (which cannot be tested by cu_test)
+        BlockLen           - "bl" in "PARAMETERS" part
+        DataLowerBound     - "dlb" in "PARAMETERS" part
+        SgnLev             - the criterion used to do the hypothesis testing (0.05)
+
+    Return:
+        PassRate in cu_test
+    '''
+    data = trans_data(TestData, BlockLen, DataLowerBound)
+    timeperiod = BlockLen*60
+    return cu_test(data,timeperiod,alpha=SgLev)
+
+
+
+################
+### LOG TEST ###
+################
+
+def R_forLogTest(sample_data,Periods):
+    '''
+    R_forLogTest:
+        process the data in time_set to the value which is used to do the Log Test
+    
+    Parameters:
+        Periods - bl*60
+    
+    Return:
+        R_data - the data used in Log Test
+    '''
+    n = len(sample_data)
+    R1 = n*np.log(Periods/(Periods-sample_data[0]))
+    R_data = [R1]
+    for i in range(1,n):
+        r = (n-i)*np.log((Periods-sample_data[i-1])/(Periods-sample_data[i]))
+        R_data.append(r)
+    return R_data
+
+def log_test(data,Periods,alpha):
+    '''
+    log_test:
+        implement the Log Test for "data" (which will explained below)
+    
+    Parameters:
+        data      - the same as "data" from trans_data function
+        Periods   - bl*60
+        alpha     - the criterion used to do the hypothesis testing (0.05)
+
+    Return:
+        PassRate - the same as "PassRate" in cu_test
+    '''
+    NumTestPass = 0
+    num_data = len(data)
+    if num_data < 1:
+        return None
+    for idx in range(num_data):
+        sample_data = data[idx]
+        sample_data = R_forLogTest(sample_data,Periods)
+        (a,p_value) = stats.kstest(sample_data,"expon")
+        if p_value >= alpha:
+            NumTestPass = NumTestPass + 1
+        PassRate = NumTestPass/num_data
+    return PassRate
+
+def log_test_1(TestData, BlockLen, DataLowerBound, SgLev=0.05):
+    '''
+    log_test_1:
+        transform the data into the suitable form and test it by log_test
+    
+    Parameters:
+        TestData           - the arrival records in a whole day (which cannot be tested by log_test)
+        BlockLen           - "bl" in "PARAMETERS" part
+        DataLowerBound     - "dlb" in "PARAMETERS" part
+        SgnLev             - the criterion used to do the hypothesis testing (0.05)
+
+    Return:
+        PassRate in log_test
+    '''
+    data = trans_data(TestData, BlockLen, DataLowerBound)
+    timeperiod = BlockLen*60 
+    return log_test(data,timeperiod,alpha=SgLev)
+
+
+
+####################
+### FINAL REPORT ###
+####################
+
+weekday_dict = {}
+weekday_list = ["Mon","Tus","Wed","Thu","Fri","Sat","Sun"]
+weekday_dict["Mon"] = list_day_seconds_Mon
+weekday_dict["Tus"] = list_day_seconds_Tus
+weekday_dict["Wed"] = list_day_seconds_Wed
+weekday_dict["Thu"] = list_day_seconds_Thu
+weekday_dict["Fri"] = list_day_seconds_Fri
+weekday_dict["Sat"] = list_day_seconds_Sat
+weekday_dict["Sun"] = list_day_seconds_Sun
+
+def report(weekday,block_length,criterion,datalowerbound):
+    '''
+    report:
+        report the result of one of the weekdays (e.g., xx/52 Monday pass the test), with the specific conditions on bl, dlb, and ct
+
+    Parameters:
+        weekday             - "wd" in the "PARAMETERS" part
+        block_length        - "bl" in the "PARAMETERS" part
+        criterion           - "ct" in the "PARAMETERS" part
+        datalowerbound      - "dlb" in the "PARAMETERS" part
+
+    Return:
+        a str as the form:
+        xx/xx pass cu test, xx/xx pass log test, with block lenth = xx min, criterion = 0.xx
+    '''
+    data_list = weekday_dict[weekday]
+    pass_log = 0
+    available_weeknumber = len(data_list)
+    pass_cu = 0
+    for sample in data_list:
+        a = log_test_1(sample,block_length,datalowerbound)
+        b = cu_test_1(sample,block_length,datalowerbound)
+        if a is None:
+            available_weeknumber = available_weeknumber -1
+        else:
+            if a >= criterion:
+                pass_log = pass_log + 1
+        if b is None:
+            pass 
+        else:
+            if b >= criterion:
+                pass_cu = pass_cu + 1
+    return "%s/%s pass cu test, %s/%s pass log test, with block lenth = %dmin, criterion = %.2f" %(format(pass_cu,'2.0f'), format(available_weeknumber,'2.0f'), format(pass_log,'2.0f'), format(available_weeknumber,'2.0f'), block_length, criterion)
+
+# report the result with different block length, criterion, and dlb = 10
+print("----- Results of various bl, ct (dlb=10) -----")
+dlb = 10
+for wd in weekday_list:
+    print("----- ",wd," -----")
+    for bl in range(10,61,10):
+        for ct in [0.85,0.90,0.95]:
+            print(report(wd,bl,ct,dlb))
+print("END - END - END - END - END - END - END - END")
+
+# find the answer to the question:
+# Whether or not the data lower bound matters?
+print("----- Whether or not the dlb matters? -----")
+bl = 10
+ct = 0.9
+for wd in weekday_list:
+    print("----- ",wd," -----")
+    for dlb in range(3,31,3):
+        print("data lower bound is ", format(dlb,'2.0f')," ||:", report(wd,bl,ct,dlb))
